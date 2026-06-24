@@ -158,10 +158,9 @@ class ProvidersWindow(ctk.CTkToplevel):
         self._name_entry.focus()
 
     def _set_enabled(self, enabled: bool) -> None:
-        state = "normal" if enabled else "disabled"
-        self._name_entry.configure(state=state)
-        self._npi_entry.configure(state=state)
-        self._delete_btn.configure(state="normal" if (enabled and self._selected) else "disabled")
+        # Fields are always editable — only gate the delete button
+        self._delete_btn.configure(
+            state="normal" if (enabled and self._selected) else "disabled")
 
     def _save(self) -> None:
         name = self._name_var.get().strip()
