@@ -46,7 +46,10 @@ def main() -> None:
 
     def launch_main() -> None:
         from app.gui.main_window import MainWindow
+        from app.gui.onboarding import OnboardingWindow, should_show
         MainWindow(root, cfg)
+        if should_show(cfg):
+            root.after(400, lambda: OnboardingWindow(root, cfg))
 
     if cfg.get("pin_hash"):
         from app.gui.login_window import LoginWindow
