@@ -20,6 +20,7 @@ import numpy as np
 import app.gui.theme as T
 from app.gui.theme import C, make_font
 from app.core import audio, config, note_history, audit_log
+from app.core.ambient import AmbientListener
 from app.core.note_templates import registry
 from app.core.providers import list_providers, format_provider
 
@@ -49,12 +50,18 @@ class MainWindow(ctk.CTkFrame):
         self._waveform_job: str | None = None
         self._progress_job: str | None = None
 
+        # Ambient mode
+        self._ambient_queue: queue.Queue[bytes] = queue.Queue()
+        self._ambient_listener: audio.AmbientListener | None = None
+        self._ambient_poll_job: str | None = None
+
         self._build_ui()
         self._refresh_template_combo()
         self._inactivity_reset()
         self._connectivity_check()
 
         parent.bind("<F2>", lambda _: self._on_toggle_recording())
+        parent.bind("<F4>", lambda _: self._on_toggle_ambient())
         parent.bind("<F5>", lambda _: self._on_generate_note())
         parent.bind("<Motion>", lambda _: self._inactivity_reset())
         parent.bind("<Key>",    lambda _: self._inactivity_reset())
@@ -170,6 +177,13 @@ class MainWindow(ctk.CTkFrame):
             height=42, width=110,
         )
         # Hidden until recording starts
+
+        self._ambient_btn = T.ghost_btn(
+            toolbar, "🎙 Ambient (F4)",
+            command=self._on_toggle_ambient,
+            height=42, width=150,
+        )
+        self._ambient_btn.pack(side="left", padx=(6, 0))
 
         self._rec_indicator = ctk.CTkLabel(toolbar, text="",
                                             font=make_font(12, bold=True),
@@ -453,6 +467,8 @@ class MainWindow(ctk.CTkFrame):
 
     def _on_toggle_recording(self) -> None:
         self._inactivity_reset()
+        if self._ambient_listener and self._ambient_listener.is_running:
+            return  # don't overlap with ambient mode
         if self.recorder.is_recording:
             self._recording_stop()
         else:
@@ -517,6 +533,105 @@ class MainWindow(ctk.CTkFrame):
                 self.after_cancel(self._live_job)
                 self._live_job = None
             self._waveform_stop()
+
+    # ── Ambient mode ──────────────────────────────────────────────────────────
+
+    def _on_toggle_ambient(self) -> None:
+        if self.recorder.is_recording:
+            return  # don't overlap with manual recording
+        if self._ambient_listener and self._ambient_listener.is_running:
+            self._ambient_stop()
+        else:
+            self._ambient_start()
+
+    def _ambient_start(self) -> None:
+        while not self._ambient_queue.empty():
+            try:
+                self._ambient_queue.get_nowait()
+            except queue.Empty:
+                break
+        self._ambient_listener = AmbientListener(
+            out_queue=self._ambient_queue,
+            device_index=self._selected_device_index(),
+        )
+        try:
+            self._ambient_listener.start()
+        except Exception as e:
+            from tkinter import messagebox
+            messagebox.showerror("Microphone Error", str(e))
+            self._ambient_listener = None
+            return
+        self._ambient_btn.configure(
+            text="⏹ Stop Ambient",
+            fg_color=C["accent"], text_color=C["bg"],
+            hover_color=C["accent_dark"],
+        )
+        self._transcript_box.configure(state="normal")
+        self._transcript_box.delete("1.0", "end")
+        self._transcript_box.insert("end", "Ambient mode active — listening…\n")
+        self._transcript_box.configure(state="disabled")
+        self._status("Ambient mode — mic is live, transcribing automatically.", "record")
+        self._rec_indicator_animate()
+        self._ambient_poll_job = self.after(200, self._ambient_poll)
+
+    def _ambient_stop(self) -> None:
+        if self._ambient_poll_job:
+            self.after_cancel(self._ambient_poll_job)
+            self._ambient_poll_job = None
+        if self._ambient_listener:
+            self._ambient_listener.stop()
+            self._ambient_listener = None
+        self._ambient_btn.configure(
+            text="🎙 Ambient (F4)",
+            fg_color="transparent",
+            text_color=C["text"],
+            hover_color=C["border"],
+        )
+        self._rec_indicator.configure(text="")
+        self._status("Ambient mode stopped. Click Generate Note to create the chart note.", "normal")
+
+    def _ambient_poll(self) -> None:
+        """Check for completed speech segments and transcribe each one."""
+        if not self._ambient_listener or not self._ambient_listener.is_running:
+            return
+        try:
+            wav = self._ambient_queue.get_nowait()
+            threading.Thread(
+                target=self._ambient_transcribe_worker,
+                args=(wav,),
+                daemon=True,
+            ).start()
+        except queue.Empty:
+            pass
+        self._ambient_poll_job = self.after(200, self._ambient_poll)
+
+    def _ambient_transcribe_worker(self, wav_bytes: bytes) -> None:
+        try:
+            from app.core import transcriber
+            text = transcriber.transcribe(
+                wav_bytes,
+                backend=self.cfg.get("whisper_backend", "faster-whisper"),
+                model_size=self.cfg.get("whisper_model", "base.en"),
+                device=self.cfg.get("whisper_device", "cpu"),
+                compute_type=self.cfg.get("whisper_compute_type", "float32"),
+                language=self.cfg.get("whisper_language", "en"),
+            )
+            if text and text.strip():
+                self.after(0, self._ambient_append, text.strip())
+        except Exception:
+            pass
+
+    def _ambient_append(self, text: str) -> None:
+        self._transcript_box.configure(state="normal")
+        current = self._transcript_box.get("1.0", "end").strip()
+        # Remove the placeholder on first real segment
+        if current == "Ambient mode active — listening…":
+            self._transcript_box.delete("1.0", "end")
+            self._transcript_box.insert("end", text + " ")
+        else:
+            self._transcript_box.insert("end", text + " ")
+        self._transcript_box.see("end")
+        self._transcript_box.configure(state="disabled")
 
     def _rec_indicator_animate(self) -> None:
         if not self.recorder.is_recording:
