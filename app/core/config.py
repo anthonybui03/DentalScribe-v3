@@ -102,3 +102,8 @@ def salt_path() -> Path:
 def templates_path() -> Path:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     return DATA_DIR / "templates.json"
+
+
+def draft_path() -> Path:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    return DATA_DIR / "draft.json"

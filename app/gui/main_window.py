@@ -55,10 +55,15 @@ class MainWindow(ctk.CTkFrame):
         self._ambient_listener: audio.AmbientListener | None = None
         self._ambient_poll_job: str | None = None
 
+        # Auto-save
+        self._autosave_job: str | None = None
+
         self._build_ui()
         self._refresh_template_combo()
         self._inactivity_reset()
         self._connectivity_check()
+        self._autosave_start()
+        self.after(500, self._autosave_restore_prompt)
 
         parent.bind("<F2>", lambda _: self._on_toggle_recording())
         parent.bind("<F4>", lambda _: self._on_toggle_ambient())
@@ -780,6 +785,7 @@ class MainWindow(ctk.CTkFrame):
             f"template={self._template_combo.get()}",
             self.cfg.get("_fernet"),
         )
+        self._autosave_clear()
 
     # ── Actions ───────────────────────────────────────────────────────────────
 
@@ -809,6 +815,78 @@ class MainWindow(ctk.CTkFrame):
     def _on_settings(self) -> None:
         from app.gui.settings_window import SettingsWindow
         SettingsWindow(self, self.cfg)
+
+    # ── Auto-save draft ───────────────────────────────────────────────────────
+
+    def _autosave_start(self) -> None:
+        self._autosave_tick()
+
+    def _autosave_tick(self) -> None:
+        self._autosave_write()
+        self._autosave_job = self.after(30_000, self._autosave_tick)
+
+    def _autosave_write(self) -> None:
+        transcript = self._transcript_box.get("1.0", "end").strip()
+        note = self._note_box.get("1.0", "end").strip()
+        bad = {"", "Listening…", "Ambient mode active — listening…"}
+        if transcript in bad and not note:
+            return
+        import json
+        from app.core.config import draft_path
+        try:
+            draft_path().write_text(json.dumps({
+                "transcript": transcript,
+                "note": note,
+                "patient_id": self._patient_var.get(),
+                "template": self._template_combo.get(),
+            }, indent=2), encoding="utf-8")
+        except Exception:
+            pass
+
+    def _autosave_clear(self) -> None:
+        from app.core.config import draft_path
+        try:
+            p = draft_path()
+            if p.exists():
+                p.unlink()
+        except Exception:
+            pass
+
+    def _autosave_restore_prompt(self) -> None:
+        import json
+        from app.core.config import draft_path
+        p = draft_path()
+        if not p.exists():
+            return
+        try:
+            data = json.loads(p.read_text(encoding="utf-8"))
+        except Exception:
+            return
+        transcript = data.get("transcript", "").strip()
+        note = data.get("note", "").strip()
+        if not transcript and not note:
+            return
+        from tkinter import messagebox
+        restore = messagebox.askyesno(
+            "Restore Draft",
+            "An unsaved draft was found from a previous session.\n\nRestore it?",
+        )
+        if restore:
+            self._patient_var.set(data.get("patient_id", ""))
+            tpl = data.get("template", "")
+            if tpl:
+                self._template_combo.set(tpl)
+            if transcript:
+                self._transcript_box.configure(state="normal")
+                self._transcript_box.delete("1.0", "end")
+                self._transcript_box.insert("end", transcript)
+            if note:
+                self._note_box.configure(state="normal")
+                self._note_box.delete("1.0", "end")
+                self._note_box.insert("end", note)
+            self._status("Draft restored.", "success")
+        else:
+            self._autosave_clear()
 
     # ── Inactivity / auto-lock ────────────────────────────────────────────────
 
