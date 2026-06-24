@@ -164,6 +164,13 @@ class MainWindow(ctk.CTkFrame):
         )
         self._rec_btn.pack(side="left")
 
+        self._pause_btn = T.ghost_btn(
+            toolbar, "⏸  Pause",
+            command=self._on_pause_resume,
+            height=42, width=110,
+        )
+        # Hidden until recording starts
+
         self._rec_indicator = ctk.CTkLabel(toolbar, text="",
                                             font=make_font(12, bold=True),
                                             text_color=C["record"])
@@ -392,7 +399,7 @@ class MainWindow(ctk.CTkFrame):
         self._waveform_canvas.delete("all")
 
     def _waveform_tick(self) -> None:
-        if not self.recorder.is_recording:
+        if not self.recorder.is_recording or self.recorder.is_paused:
             self._waveform_stop()
             return
         snap = self.recorder.get_snapshot()
@@ -461,6 +468,8 @@ class MainWindow(ctk.CTkFrame):
             return
         self._rec_btn.configure(text="⏹   Stop Dictation",
                                  fg_color=C["record"], hover_color=C["record_dark"])
+        self._pause_btn.configure(text="⏸  Pause")
+        self._pause_btn.pack(side="left", padx=(6, 0))
         self._status("Recording — speak clearly.", "record")
         self._transcript_box.configure(state="normal")
         self._transcript_box.delete("1.0", "end")
@@ -477,6 +486,7 @@ class MainWindow(ctk.CTkFrame):
             self.after_cancel(self._live_job)
             self._live_job = None
         self._waveform_stop()
+        self._pause_btn.pack_forget()
         self._wav_bytes = self.recorder.stop()
         self._rec_btn.configure(text="⏺   Start Dictation",
                                  fg_color=C["accent"], hover_color=C["accent_dark"])
@@ -487,6 +497,26 @@ class MainWindow(ctk.CTkFrame):
         self._status("Transcribing…", "normal")
         self._progress_start()
         threading.Thread(target=self._transcribe_final, daemon=True).start()
+
+    def _on_pause_resume(self) -> None:
+        if not self.recorder.is_recording:
+            return
+        if self.recorder.is_paused:
+            self.recorder.resume()
+            self._pause_btn.configure(text="⏸  Pause")
+            self._status("Recording resumed.", "record")
+            self._waveform_start()
+            self._live_running = True
+            self._live_job = self.after(_LIVE_INTERVAL_MS, self._live_tick)
+        else:
+            self.recorder.pause()
+            self._pause_btn.configure(text="▶  Resume")
+            self._status("Recording paused — click Resume to continue.", "warn")
+            self._live_running = False
+            if self._live_job:
+                self.after_cancel(self._live_job)
+                self._live_job = None
+            self._waveform_stop()
 
     def _rec_indicator_animate(self) -> None:
         if not self.recorder.is_recording:
