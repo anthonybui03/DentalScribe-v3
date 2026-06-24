@@ -709,8 +709,9 @@ class MainWindow(ctk.CTkFrame):
 
     def _on_generate_note(self) -> None:
         transcript = self._transcript_box.get("1.0", "end").strip()
-        if not transcript or transcript in ("Listening…", ""):
-            self._status("No transcript to generate from.", "warn")
+        bad = {"", "Listening…", "Ambient mode active — listening…"}
+        if not transcript or transcript in bad or len(transcript) < 20:
+            self._status("Record a dictation first before generating a note.", "warn")
             return
         tpl = registry.get(self._template_combo.get())
         self._note_box.configure(state="normal")

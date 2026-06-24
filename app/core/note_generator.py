@@ -6,6 +6,18 @@ from collections.abc import Iterator
 from typing import Optional
 
 
+_ANTI_HALLUCINATION = (
+    "CRITICAL RULES — follow without exception:\n"
+    "1. Use ONLY information explicitly stated in the dictation provided by the user.\n"
+    "2. Do NOT invent, assume, or infer any clinical findings, measurements, medications, "
+    "tooth numbers, diagnoses, or procedures that were not spoken.\n"
+    "3. If a required section has no corresponding dictation, write exactly: "
+    "'Not dictated.' — never leave a section blank or fill it with guessed content.\n"
+    "4. If the dictation is too short or unclear to produce a complete note, write a brief "
+    "note from what was said and mark unclear sections as 'Not dictated.'\n\n"
+)
+
+
 def generate_note_stream(
     transcript: str,
     system_prompt: str,
@@ -15,12 +27,13 @@ def generate_note_stream(
 ) -> Iterator[str]:
     """Yield text chunks as they stream from Ollama."""
     url = f"{ollama_host.rstrip('/')}/api/chat"
+    full_system = _ANTI_HALLUCINATION + system_prompt
     payload = json.dumps({
         "model": model,
         "temperature": temperature,
         "stream": True,
         "messages": [
-            {"role": "system", "content": system_prompt},
+            {"role": "system", "content": full_system},
             {"role": "user",   "content": transcript},
         ],
     }).encode()
