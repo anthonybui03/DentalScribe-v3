@@ -2,7 +2,6 @@
 import sqlite3
 import datetime
 from dataclasses import dataclass
-from typing import Optional
 from app.core.config import notes_db_path
 
 
@@ -12,6 +11,7 @@ class HistoryEntry:
     timestamp: str
     patient_id: str
     template: str
+    provider: str
     transcript: str
     note: str
 
@@ -24,21 +24,27 @@ def _conn() -> sqlite3.Connection:
             timestamp   TEXT NOT NULL,
             patient_id  TEXT NOT NULL DEFAULT '',
             template    TEXT NOT NULL DEFAULT '',
+            provider    TEXT NOT NULL DEFAULT '',
             transcript  TEXT NOT NULL DEFAULT '',
             note        TEXT NOT NULL DEFAULT ''
         )
     """)
+    # Migrate existing DBs that don't have the provider column
+    cols = [r[1] for r in c.execute("PRAGMA table_info(notes)").fetchall()]
+    if "provider" not in cols:
+        c.execute("ALTER TABLE notes ADD COLUMN provider TEXT NOT NULL DEFAULT ''")
     c.commit()
     return c
 
 
-def save_entry(patient_id: str, template: str, transcript: str, note: str) -> int:
+def save_entry(patient_id: str, template: str, transcript: str,
+               note: str, provider: str = "") -> int:
     ts = datetime.datetime.now().isoformat(sep=" ", timespec="seconds")
     with _conn() as c:
         cur = c.execute(
-            "INSERT INTO notes (timestamp, patient_id, template, transcript, note) "
-            "VALUES (?, ?, ?, ?, ?)",
-            (ts, patient_id, template, transcript, note),
+            "INSERT INTO notes (timestamp, patient_id, template, provider, transcript, note) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (ts, patient_id, template, provider, transcript, note),
         )
         return cur.lastrowid
 
@@ -46,14 +52,21 @@ def save_entry(patient_id: str, template: str, transcript: str, note: str) -> in
 def load_entries(
     patient_id: str = "",
     search: str = "",
+    provider: str = "",
     limit: int = 200,
     offset: int = 0,
 ) -> list[HistoryEntry]:
-    query = "SELECT id, timestamp, patient_id, template, transcript, note FROM notes WHERE 1=1"
+    query = (
+        "SELECT id, timestamp, patient_id, template, provider, transcript, note "
+        "FROM notes WHERE 1=1"
+    )
     params: list = []
     if patient_id:
         query += " AND patient_id LIKE ?"
         params.append(f"%{patient_id}%")
+    if provider:
+        query += " AND provider LIKE ?"
+        params.append(f"%{provider}%")
     if search:
         query += " AND (transcript LIKE ? OR note LIKE ?)"
         params += [f"%{search}%", f"%{search}%"]

@@ -21,6 +21,7 @@ import app.gui.theme as T
 from app.gui.theme import C, make_font
 from app.core import audio, config, note_history, audit_log
 from app.core.note_templates import registry
+from app.core.providers import list_providers, format_provider
 
 _LIVE_INTERVAL_MS  = 3_000   # live transcription tick
 _STREAM_POLL_MS    = 40      # streaming note update poll
@@ -71,7 +72,7 @@ class MainWindow(ctk.CTkFrame):
         sb = ctk.CTkFrame(self, fg_color=C["surface"], corner_radius=0, width=224)
         sb.grid(row=0, column=0, rowspan=2, sticky="nsew")
         sb.grid_propagate(False)
-        sb.grid_rowconfigure(11, weight=1)
+        sb.grid_rowconfigure(14, weight=1)
 
         # Logo
         ctk.CTkLabel(sb, text="DentalScribe", font=make_font(16, bold=True),
@@ -90,30 +91,40 @@ class MainWindow(ctk.CTkFrame):
 
         T.divider(sb).grid(row=4, column=0, sticky="ew", padx=12, pady=8)
 
+        # Provider
+        T.section_label(sb, "Provider").grid(row=5, column=0, sticky="w", padx=16)
+        self._provider_combo = T.make_combo(sb, width=192,
+                                             command=lambda _: None)
+        self._provider_combo.grid(row=6, column=0, padx=16, pady=(4, 2))
+        T.ghost_btn(sb, "Manage Providers…",
+                    command=self._on_manage_providers,
+                    height=28, width=192).grid(row=7, column=0, padx=16, pady=(0, 8))
+        self._refresh_provider_combo()
+
         # Patient ID
-        T.section_label(sb, "Patient ID").grid(row=5, column=0, sticky="w", padx=16)
+        T.section_label(sb, "Patient ID").grid(row=8, column=0, sticky="w", padx=16)
         self._patient_var = ctk.StringVar()
         T.make_entry(sb, textvariable=self._patient_var,
                      placeholder="Optional patient ID",
-                     width=192).grid(row=6, column=0, padx=16, pady=(4, 10))
+                     width=192).grid(row=9, column=0, padx=16, pady=(4, 10))
 
         # Template
-        T.section_label(sb, "Template").grid(row=7, column=0, sticky="w", padx=16)
+        T.section_label(sb, "Template").grid(row=10, column=0, sticky="w", padx=16)
         self._template_var = ctk.StringVar()
         self._template_combo = T.make_combo(sb, width=192,
                                              command=self._on_template_change)
-        self._template_combo.grid(row=8, column=0, padx=16, pady=(4, 2))
+        self._template_combo.grid(row=11, column=0, padx=16, pady=(4, 2))
         T.ghost_btn(sb, "Manage Templates…",
                     command=self._on_manage_templates,
-                    height=28, width=192).grid(row=9, column=0, padx=16, pady=(0, 10))
+                    height=28, width=192).grid(row=12, column=0, padx=16, pady=(0, 10))
 
         # Microphone
-        T.section_label(sb, "Microphone").grid(row=10, column=0, sticky="w", padx=16)
+        T.section_label(sb, "Microphone").grid(row=13, column=0, sticky="w", padx=16)
         self._mic_combo = T.make_combo(sb, width=192)
-        self._mic_combo.grid(row=11, column=0, padx=16, pady=(4, 4))
+        self._mic_combo.grid(row=14, column=0, padx=16, pady=(4, 4))
 
         mic_btns = ctk.CTkFrame(sb, fg_color="transparent")
-        mic_btns.grid(row=12, column=0, padx=16, sticky="ew")
+        mic_btns.grid(row=15, column=0, padx=16, sticky="ew")
         T.ghost_btn(mic_btns, "⟳", command=self._refresh_devices,
                     height=26, width=40).pack(side="left")
         T.ghost_btn(mic_btns, "Test Mic", command=self._on_mic_test,
@@ -121,18 +132,18 @@ class MainWindow(ctk.CTkFrame):
 
         self._mic_test_label = ctk.CTkLabel(sb, text="", font=make_font(9),
                                              text_color=C["text3"])
-        self._mic_test_label.grid(row=13, column=0, padx=16, sticky="w")
+        self._mic_test_label.grid(row=16, column=0, padx=16, sticky="w")
 
         self._refresh_devices()
 
-        T.divider(sb).grid(row=14, column=0, sticky="ew", padx=12, pady=8)
+        T.divider(sb).grid(row=17, column=0, sticky="ew", padx=12, pady=8)
 
         # Nav buttons
         for row, (label, cmd) in enumerate([
             ("History",   self._on_history),
             ("Audit Log", self._on_audit),
             ("Settings",  self._on_settings),
-        ], start=15):
+        ], start=18):
             T.subtle_btn(sb, label, command=cmd, height=34,
                          width=192, anchor="w").grid(row=row, column=0, padx=12, pady=2)
 
@@ -256,6 +267,24 @@ class MainWindow(ctk.CTkFrame):
         )
         if not ollama_ok:
             self._status("Ollama not reachable — note generation unavailable.", "warn")
+
+    # ── Provider helpers ──────────────────────────────────────────────────────
+
+    def _refresh_provider_combo(self) -> None:
+        providers = list_providers()
+        self._providers_map = {format_provider(p): p for p in providers}
+        labels = ["(No provider selected)"] + list(self._providers_map)
+        self._provider_combo.configure(values=labels)
+        if self._provider_combo.get() not in labels:
+            self._provider_combo.set(labels[0])
+
+    def _selected_provider_label(self) -> str:
+        val = self._provider_combo.get()
+        return "" if val == "(No provider selected)" else val
+
+    def _on_manage_providers(self) -> None:
+        from app.gui.providers_window import ProvidersWindow
+        ProvidersWindow(self, on_change=self._refresh_provider_combo)
 
     # ── Template helpers ──────────────────────────────────────────────────────
 
@@ -525,8 +554,11 @@ class MainWindow(ctk.CTkFrame):
         self._transcript_box.delete("1.0", "end")
         self._transcript_box.insert("end", text)
         self._status("Transcription complete. Click Generate Note or press F5.", "success")
-        audit_log.log_event("transcribe", f"patient={self._patient_var.get()}",
-                            self.cfg.get("_fernet"))
+        audit_log.log_event(
+            "transcribe",
+            f"patient={self._patient_var.get()} provider={self._selected_provider_label()}",
+            self.cfg.get("_fernet"),
+        )
 
     # ── Note generation (streaming) ───────────────────────────────────────────
 
@@ -587,16 +619,19 @@ class MainWindow(ctk.CTkFrame):
         self._progress_stop()
         note = self._note_box.get("1.0", "end").strip()
         self._status("Note generated. Review before chart entry.", "success")
+        provider = self._selected_provider_label()
         if self.cfg.get("save_notes_locally", True):
             note_history.save_entry(
                 patient_id=self._patient_var.get(),
                 template=self._template_combo.get(),
                 transcript=self._transcript_box.get("1.0", "end").strip(),
                 note=note,
+                provider=provider,
             )
         audit_log.log_event(
             "generate_note",
-            f"patient={self._patient_var.get()} template={self._template_combo.get()}",
+            f"patient={self._patient_var.get()} provider={provider} "
+            f"template={self._template_combo.get()}",
             self.cfg.get("_fernet"),
         )
 

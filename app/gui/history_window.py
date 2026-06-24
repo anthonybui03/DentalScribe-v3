@@ -29,14 +29,17 @@ class HistoryWindow(ctk.CTkToplevel):
         top = ctk.CTkFrame(self, fg_color="transparent")
         top.grid(row=0, column=0, sticky="ew", padx=12, pady=(12, 4))
 
-        self._patient_var = ctk.StringVar()
-        self._search_var = ctk.StringVar()
+        self._patient_var  = ctk.StringVar()
+        self._provider_var = ctk.StringVar()
+        self._search_var   = ctk.StringVar()
 
         make_entry(top, textvariable=self._patient_var, placeholder="Patient ID",
-                   width=160).pack(side="left", padx=(0, 6))
+                   width=130).pack(side="left", padx=(0, 6))
+        make_entry(top, textvariable=self._provider_var, placeholder="Provider",
+                   width=130).pack(side="left", padx=(0, 6))
         make_entry(top, textvariable=self._search_var,
                    placeholder="Search notes/transcripts…",
-                   width=240).pack(side="left", padx=(0, 6))
+                   width=200).pack(side="left", padx=(0, 6))
         ghost_btn(top, "Search", command=self._search, height=30).pack(side="left")
         ghost_btn(top, "Clear", command=self._clear_search, height=30).pack(side="left", padx=4)
 
@@ -94,6 +97,7 @@ class HistoryWindow(ctk.CTkToplevel):
         self._entries = note_history.load_entries(
             patient_id=self._patient_var.get(),
             search=self._search_var.get(),
+            provider=self._provider_var.get(),
             limit=PAGE_SIZE,
             offset=self._offset,
         )
@@ -109,7 +113,8 @@ class HistoryWindow(ctk.CTkToplevel):
                          font=make_font(11), text_color=C["text3"]).grid(padx=8, pady=8)
             return
         for i, e in enumerate(self._entries):
-            text = f"{e.timestamp[:16]}\n{e.patient_id or '—'}  ·  {e.template}"
+            provider_str = f"  ·  {e.provider}" if e.provider else ""
+            text = f"{e.timestamp[:16]}\n{e.patient_id or '—'}  ·  {e.template}{provider_str}"
             btn = ctk.CTkButton(
                 self._list_box, text=text, anchor="w",
                 fg_color="transparent", hover_color=C["border"],
@@ -122,8 +127,9 @@ class HistoryWindow(ctk.CTkToplevel):
     def _select(self, idx: int) -> None:
         self._selected_idx = idx
         e = self._entries[idx]
+        provider_str = f"  ·  {e.provider}" if e.provider else ""
         self._detail_header.configure(
-            text=f"{e.timestamp}  ·  {e.patient_id or 'No patient'}  ·  {e.template}")
+            text=f"{e.timestamp}  ·  {e.patient_id or 'No patient'}  ·  {e.template}{provider_str}")
         self._detail_box.configure(state="normal")
         self._detail_box.delete("1.0", "end")
         self._detail_box.insert("end", f"── TRANSCRIPT ──\n{e.transcript}\n\n── NOTE ──\n{e.note}")
@@ -154,6 +160,7 @@ class HistoryWindow(ctk.CTkToplevel):
 
     def _clear_search(self) -> None:
         self._patient_var.set("")
+        self._provider_var.set("")
         self._search_var.set("")
         self._offset = 0
         self._load()
